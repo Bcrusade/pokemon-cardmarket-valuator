@@ -25,37 +25,34 @@ export type FetchHtmlResponse = {
   html_length: number;
 };
 
-async function requestJson<T>(path: string, payload: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+async function postJson<T>(path: string, payload: unknown): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify(payload)
   });
 
-  let bodyText = '';
-  try {
-    bodyText = await res.text();
-  } catch {
-    bodyText = '';
+  const rawBody = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status}) ${path}: ${rawBody || 'No response body'}`);
   }
 
-  if (!res.ok) {
-    throw new Error(`Request failed (${res.status}) ${path}: ${bodyText || 'No error body returned'}`);
-  }
-
-  return bodyText ? (JSON.parse(bodyText) as T) : ({} as T);
+  return rawBody ? (JSON.parse(rawBody) as T) : ({} as T);
 }
 
 export async function createJob(payload: CreateJobPayload) {
-  return requestJson<CreateJobResponse>('/jobs', payload);
+  return postJson<CreateJobResponse>('/jobs', payload);
 }
 
 export async function ingestCandidates(jobId: string, results: CandidateInputPayload[]) {
-  return requestJson<{ ingested_count: number }>(`/jobs/${jobId}/candidates`, { results });
+  return postJson<{ ingested_count: number }>(`/jobs/${jobId}/candidates`, { results });
 }
 
 export async function fetchHtmlProvided(jobId: string, candidateUrl: string, providedHtml: string) {
-  return requestJson<FetchHtmlResponse>(`/jobs/${jobId}/candidates/fetch-html`, {
+  return postJson<FetchHtmlResponse>(`/jobs/${jobId}/candidates/fetch-html`, {
     candidate_url: candidateUrl,
     retrieval_mode: 'provided',
     provided_html: providedHtml
@@ -63,7 +60,7 @@ export async function fetchHtmlProvided(jobId: string, candidateUrl: string, pro
 }
 
 export async function runFullEvaluation(jobId: string, candidateUrl: string) {
-  return requestJson<unknown>(`/jobs/${jobId}/candidates/run-full-evaluation`, {
+  return postJson<unknown>(`/jobs/${jobId}/candidates/run-full-evaluation`, {
     candidate_url: candidateUrl
   });
 }
