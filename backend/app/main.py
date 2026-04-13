@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.modules.anomaly_filter import flag_listing_row_anomalies
 from app.modules.candidate_discovery import normalize_discovery_batch
@@ -34,6 +35,18 @@ from app.schemas import (
 from app.store import store
 
 app = FastAPI(title="Pokemon Cardmarket Valuator API", version="0.1.0")
+
+# ✅ CORS FIX (fondamentale per il frontend)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/jobs", response_model=CreateJobResponse)
@@ -177,6 +190,7 @@ def valuate_candidate(job_id: UUID, payload: ValuationRequest) -> ValuationResul
     store.save_valuation(job_id, valuation)
     return valuation
 
+
 @app.post("/jobs/{job_id}/candidates/run-full-evaluation", response_model=FullEvaluationResult)
 def run_candidate_full_evaluation(job_id: UUID, payload: FullEvaluationRequest) -> FullEvaluationResult:
     try:
@@ -188,74 +202,6 @@ def run_candidate_full_evaluation(job_id: UUID, payload: FullEvaluationRequest) 
 
     store.save_full_evaluation(job_id, evaluation)
     return evaluation
-
-@app.post("/jobs/{job_id}/analyze", deprecated=True)
-def analyze_job(job_id: UUID) -> dict:
-    """Legacy compatibility endpoint.
-
-    Deprecated: this route runs the pre-pipeline MVP flow and is kept only for
-    backward compatibility. Use candidate-driven endpoints, especially
-    `/jobs/{job_id}/candidates/run-full-evaluation`, for the primary workflow.
-    """
-    from app.modules.candidate_search import search_cardmarket_candidates
-    from app.modules.image_identification import identify_card_from_image
-    from app.modules.listing_parser import parse_visible_listings
-    from app.modules.product_verification import verify_product_page
-    from app.modules.pricing_engine import compute_price
-    from app.schemas import CardClarification, CardResult, JobStatus, PriceInput
-
-    try:
-        job = store.get_job(job_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Job not found") from exc
-
-    job.analysis_results = []
-    job.cards_to_clarify = []
-
-    for image in job.images:
-        identified = identify_card_from_image(image)
-        candidates = search_cardmarket_candidates(identified)
-        verification = verify_product_page(identified, candidates)
-
-        if not verification.verified:
-            job.cards_to_clarify.append(
-                CardClarification(
-                    image_id=image.image_id,
-                    reason=verification.reason,
-                    missing_data=["verified_product_page"],
-                )
-            )
-            continue
-
-        listings = parse_visible_listings(
-            verification.verified_product_url or "",
-            job.minimum_condition,
-        )
-        fallback_mode = False
-
-        try:
-            pricing = compute_price(
-                [PriceInput(amount=item["price"], flagged_anomaly=item["flagged_anomaly"]) for item in listings],
-                fallback_mode=fallback_mode,
-            )
-        except PricingError:
-            pricing = compute_price(
-                [PriceInput(amount=item["price"], flagged_anomaly=item["flagged_anomaly"]) for item in listings],
-                fallback_mode=True,
-            )
-
-        job.analysis_results.append(
-            CardResult(
-                identified_card=identified,
-                candidates=candidates,
-                verification=verification,
-                pricing=pricing,
-                listing_count_visible=len(listings),
-            )
-        )
-
-    job.status = JobStatus.ANALYZED
-    return {"job_id": job_id, "status": job.status, "cards_to_clarify": job.cards_to_clarify}
 
 
 @app.get("/jobs/{job_id}", response_model=JobRecord)
