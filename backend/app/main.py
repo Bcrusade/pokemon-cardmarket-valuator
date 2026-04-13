@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.modules.anomaly_filter import flag_listing_row_anomalies
 from app.modules.candidate_discovery import normalize_discovery_batch
@@ -38,6 +39,17 @@ from app.store import store
 
 app = FastAPI(title="Pokemon Cardmarket Valuator API", version="0.1.0")
 ZERO_UUID = UUID("00000000-0000-0000-0000-000000000000")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/jobs", response_model=CreateJobResponse)
@@ -208,6 +220,7 @@ def valuate_candidate(job_id: UUID, payload: ValuationRequest) -> ValuationResul
     store.save_valuation(job_id, valuation)
     return valuation
 
+
 @app.post("/jobs/{job_id}/candidates/run-full-evaluation", response_model=FullEvaluationResult)
 def run_candidate_full_evaluation(job_id: UUID, payload: FullEvaluationRequest) -> FullEvaluationResult:
     try:
@@ -219,6 +232,7 @@ def run_candidate_full_evaluation(job_id: UUID, payload: FullEvaluationRequest) 
 
     store.save_full_evaluation(job_id, evaluation)
     return evaluation
+
 
 @app.post("/jobs/{job_id}/analyze", deprecated=True)
 def analyze_job(job_id: UUID) -> dict:
