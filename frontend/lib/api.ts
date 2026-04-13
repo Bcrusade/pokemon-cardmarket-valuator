@@ -25,6 +25,22 @@ export type FetchHtmlResponse = {
   html_length: number;
 };
 
+export type SetIdentifiedContextPayload = {
+  candidate_url: string;
+  card_name: string;
+  set_name: string;
+  card_number: string;
+  variant: string;
+  promo: boolean | null;
+  confidence: number;
+  notes?: string[];
+};
+
+export type SetIdentifiedContextResponse = {
+  candidate_url: string;
+  stored: boolean;
+};
+
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -57,6 +73,10 @@ export async function fetchHtmlProvided(jobId: string, candidateUrl: string, pro
     retrieval_mode: 'provided',
     provided_html: providedHtml
   });
+}
+
+export async function setIdentifiedContext(jobId: string, payload: SetIdentifiedContextPayload) {
+  return postJson<SetIdentifiedContextResponse>(`/jobs/${jobId}/candidates/set-identified-context`, payload);
 }
 
 export async function runFullEvaluation(jobId: string, candidateUrl: string) {

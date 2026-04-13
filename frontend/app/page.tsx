@@ -7,6 +7,7 @@ import {
   createJob,
   fetchHtmlProvided,
   ingestCandidates,
+  setIdentifiedContext,
   runFullEvaluation
 } from '../lib/api';
 
@@ -23,6 +24,13 @@ export default function HomePage() {
   const [candidateSource, setCandidateSource] = useState('manual');
   const [candidateSetName, setCandidateSetName] = useState('');
   const [candidateCardNumber, setCandidateCardNumber] = useState('');
+
+  const [identifiedCardName, setIdentifiedCardName] = useState('');
+  const [identifiedSetName, setIdentifiedSetName] = useState('');
+  const [identifiedCardNumber, setIdentifiedCardNumber] = useState('');
+  const [identifiedVariant, setIdentifiedVariant] = useState('');
+  const [identifiedPromo, setIdentifiedPromo] = useState('unknown');
+  const [identifiedConfidence, setIdentifiedConfidence] = useState('0.9');
 
   const [htmlInput, setHtmlInput] = useState('');
   const [result, setResult] = useState<unknown>(null);
@@ -54,6 +62,12 @@ export default function HomePage() {
       setResult(null);
       setCandidateUrl('');
       setHtmlInput('');
+      setIdentifiedCardName('');
+      setIdentifiedSetName('');
+      setIdentifiedCardNumber('');
+      setIdentifiedVariant('');
+      setIdentifiedPromo('unknown');
+      setIdentifiedConfidence('0.9');
       setStatus(`Created job ${created.job_id}`);
     });
   }
@@ -76,6 +90,39 @@ export default function HomePage() {
 
       await ingestCandidates(jobId, [payload]);
       setStatus(`Candidate ingested: ${candidateUrl}`);
+    });
+  }
+
+  async function onSetIdentifiedContext(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!jobId) {
+      setError('Create a job first.');
+      return;
+    }
+    if (!candidateUrl) {
+      setError('Enter or ingest a candidate URL first.');
+      return;
+    }
+
+    const confidence = Number(identifiedConfidence);
+    if (Number.isNaN(confidence) || confidence < 0 || confidence > 1) {
+      setError('Confidence must be a number between 0 and 1.');
+      return;
+    }
+
+    const promoValue = identifiedPromo === 'true' ? true : identifiedPromo === 'false' ? false : null;
+
+    await runAction(async () => {
+      await setIdentifiedContext(jobId, {
+        candidate_url: candidateUrl,
+        card_name: identifiedCardName,
+        set_name: identifiedSetName,
+        card_number: identifiedCardNumber,
+        variant: identifiedVariant,
+        promo: promoValue,
+        confidence,
+      });
+      setStatus(`Stored identified card context for ${candidateUrl}`);
     });
   }
 
@@ -198,7 +245,70 @@ export default function HomePage() {
       </section>
 
       <section>
-        <h2>3) Provide Candidate HTML</h2>
+        <h2>3) Set Identified Card Context</h2>
+        <form onSubmit={onSetIdentifiedContext}>
+          <div>
+            <input
+              placeholder="card name"
+              value={identifiedCardName}
+              onChange={(event) => setIdentifiedCardName(event.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <input
+              placeholder="set name"
+              value={identifiedSetName}
+              onChange={(event) => setIdentifiedSetName(event.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <input
+              placeholder="card number"
+              value={identifiedCardNumber}
+              onChange={(event) => setIdentifiedCardNumber(event.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <input
+              placeholder="variant"
+              value={identifiedVariant}
+              onChange={(event) => setIdentifiedVariant(event.target.value)}
+              required
+            />
+          </div>
+          <div>
+            <label>
+              Promo{' '}
+              <select value={identifiedPromo} onChange={(event) => setIdentifiedPromo(event.target.value)}>
+                <option value="unknown">Unknown</option>
+                <option value="true">True</option>
+                <option value="false">False</option>
+              </select>
+            </label>
+          </div>
+          <div>
+            <input
+              placeholder="confidence (0-1)"
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value={identifiedConfidence}
+              onChange={(event) => setIdentifiedConfidence(event.target.value)}
+              required
+            />
+          </div>
+          <button type="submit" disabled={loading}>
+            Save Identified Context
+          </button>
+        </form>
+      </section>
+
+      <section>
+        <h2>4) Provide Candidate HTML</h2>
         <form onSubmit={onProvideHtml}>
           <textarea
             placeholder="Paste product page HTML"
@@ -217,14 +327,14 @@ export default function HomePage() {
       </section>
 
       <section>
-        <h2>4) Run Full Evaluation</h2>
+        <h2>5) Run Full Evaluation</h2>
         <button type="button" onClick={onRunFullEvaluation} disabled={loading}>
           Run Full Evaluation
         </button>
       </section>
 
       <section>
-        <h2>5) Results</h2>
+        <h2>6) Results</h2>
         {loading && <p>Loading...</p>}
         {status && <p style={{ color: 'green' }}>{status}</p>}
         {error && <p style={{ color: 'red' }}>{error}</p>}

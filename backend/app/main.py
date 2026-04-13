@@ -22,6 +22,7 @@ from app.schemas import (
     FullEvaluationRequest,
     FullEvaluationResult,
     DiscoveryIngestResponse,
+    IdentifiedCard,
     JobRecord,
     ListingRow,
     ParseCandidateHtmlRequest,
@@ -29,14 +30,16 @@ from app.schemas import (
     ParseListingHtmlRequest,
     ParseListingHtmlResponse,
     ProductPageMetadata,
+    SetIdentifiedContextRequest,
+    SetIdentifiedContextResponse,
     ValuationRequest,
     ValuationResult,
 )
 from app.store import store
 
 app = FastAPI(title="Pokemon Cardmarket Valuator API", version="0.1.0")
+ZERO_UUID = UUID("00000000-0000-0000-0000-000000000000")
 
-# ✅ CORS FIX (fondamentale per il frontend)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -113,6 +116,33 @@ def fetch_candidate_html(job_id: UUID, payload: CandidateHtmlFetchRequest) -> Ca
         stored=True,
         html_length=len(html),
     )
+
+
+@app.post("/jobs/{job_id}/candidates/set-identified-context", response_model=SetIdentifiedContextResponse)
+def set_identified_context(job_id: UUID, payload: SetIdentifiedContextRequest) -> SetIdentifiedContextResponse:
+    try:
+        known_urls = store.known_candidate_urls(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+
+    if payload.candidate_url not in known_urls:
+        raise HTTPException(status_code=400, detail="Unknown candidate URL for this job.")
+
+    store.save_identified_card_context(
+        job_id,
+        payload.candidate_url,
+        identified_card=IdentifiedCard(
+            image_id=ZERO_UUID,
+            card_name=payload.card_name,
+            set_name=payload.set_name,
+            card_number=payload.card_number,
+            variant=payload.variant,
+            promo=payload.promo,
+            confidence=payload.confidence,
+            notes=payload.notes,
+        ),
+    )
+    return SetIdentifiedContextResponse(candidate_url=payload.candidate_url, stored=True)
 
 
 @app.post("/jobs/{job_id}/candidates/parse-html", response_model=ParseCandidateHtmlResponse)
@@ -202,6 +232,75 @@ def run_candidate_full_evaluation(job_id: UUID, payload: FullEvaluationRequest) 
 
     store.save_full_evaluation(job_id, evaluation)
     return evaluation
+
+
+@app.post("/jobs/{job_id}/analyze", deprecated=True)
+def analyze_job(job_id: UUID) -> dict:
+    """Legacy compatibility endpoint.
+
+    Deprecated: this route runs the pre-pipeline MVP flow and is kept only for
+    backward compatibility. Use candidate-driven endpoints, especially
+    `/jobs/{job_id}/candidates/run-full-evaluation`, for the primary workflow.
+    """
+    from app.modules.candidate_search import search_cardmarket_candidates
+    from app.modules.image_identification import identify_card_from_image
+    from app.modules.listing_parser import parse_visible_listings
+    from app.modules.product_verification import verify_product_page
+    from app.modules.pricing_engine import compute_price
+    from app.schemas import CardClarification, CardResult, JobStatus, PriceInput
+
+    try:
+        job = store.get_job(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+
+    job.analysis_results = []
+    job.cards_to_clarify = []
+
+    for image in job.images:
+        identified = identify_card_from_image(image)
+        candidates = search_cardmarket_candidates(identified)
+        verification = verify_product_page(identified, candidates)
+
+        if not verification.verified:
+            job.cards_to_clarify.append(
+                CardClarification(
+                    image_id=image.image_id,
+                    reason=verification.reason,
+                    missing_data=["verified_product_page"],
+                )
+            )
+            continue
+
+        listings = parse_visible_listings(
+            verification.verified_product_url or "",
+            job.minimum_condition,
+        )
+        fallback_mode = False
+
+        try:
+            pricing = compute_price(
+                [PriceInput(amount=item["price"], flagged_anomaly=item["flagged_anomaly"]) for item in listings],
+                fallback_mode=fallback_mode,
+            )
+        except PricingError:
+            pricing = compute_price(
+                [PriceInput(amount=item["price"], flagged_anomaly=item["flagged_anomaly"]) for item in listings],
+                fallback_mode=True,
+            )
+
+        job.analysis_results.append(
+            CardResult(
+                identified_card=identified,
+                candidates=candidates,
+                verification=verification,
+                pricing=pricing,
+                listing_count_visible=len(listings),
+            )
+        )
+
+    job.status = JobStatus.ANALYZED
+    return {"job_id": job_id, "status": job.status, "cards_to_clarify": job.cards_to_clarify}
 
 
 @app.get("/jobs/{job_id}", response_model=JobRecord)

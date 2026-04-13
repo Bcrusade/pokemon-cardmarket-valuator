@@ -105,13 +105,29 @@ class ParseCandidateHtmlResponse(BaseModel):
     parsed_metadata: dict[str, ProductPageMetadata]
 
 
+class SetIdentifiedContextRequest(BaseModel):
+    candidate_url: str
+    card_name: str
+    set_name: str
+    card_number: str
+    variant: str
+    promo: bool | None = None
+    confidence: float
+    notes: list[str] = Field(default_factory=list)
+
+
+class SetIdentifiedContextResponse(BaseModel):
+    candidate_url: str
+    stored: bool
+
+
 class IdentifiedCard(BaseModel):
     image_id: UUID
     card_name: str
     set_name: str
     card_number: str
     variant: str
-    promo: bool
+    promo: bool | None = None
     confidence: float
     notes: list[str] = Field(default_factory=list)
 
