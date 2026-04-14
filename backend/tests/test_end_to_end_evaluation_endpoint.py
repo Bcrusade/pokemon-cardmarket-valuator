@@ -220,3 +220,51 @@ def test_candidate_metadata_alone_cannot_self_validate() -> None:
     response = client.post(f"/jobs/{job_id}/candidates/run-full-evaluation", json={"candidate_url": url})
     assert response.status_code == 200
     assert response.json()["verification"]["verified"] is False
+
+
+def test_realistic_fixtures_produce_verified_pricing_result() -> None:
+    client = TestClient(app)
+    job_id, url = _create_job_with_candidate(
+        client,
+        set_name="Base Set",
+        card_number="58/102",
+        title="Pikachu - Base Set 58/102 Unlimited",
+    )
+    _save_identified(job_id, url)
+    store.save_verified_filtered_context(UUID(job_id), url, True)
+
+    product_html = (FIXTURES / "cardmarket_product_valid.html").read_text()
+    listing_html = (FIXTURES / "cardmarket_listings_valid.html").read_text()
+    client.post(
+        f"/jobs/{job_id}/candidates/fetch-html",
+        json={"candidate_url": url, "retrieval_mode": "provided", "provided_html": f"{product_html}{listing_html}"},
+    )
+
+    response = client.post(f"/jobs/{job_id}/candidates/run-full-evaluation", json={"candidate_url": url})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verification"]["verified"] is True
+    assert body["pricing"]["average_price"] == 4.75
+    assert body["pricing"]["pricing_method"] == "verified_filtered_avg5"
+
+
+def test_realistic_mismatch_fixture_fails_verification_cleanly() -> None:
+    client = TestClient(app)
+    job_id, url = _create_job_with_candidate(
+        client,
+        set_name=None,
+        card_number=None,
+        title="Uncertain card candidate",
+    )
+    _save_identified(job_id, url, name="Pikachu")
+    mismatch_html = (FIXTURES / "cardmarket_product_mismatch.html").read_text()
+    client.post(
+        f"/jobs/{job_id}/candidates/fetch-html",
+        json={"candidate_url": url, "retrieval_mode": "provided", "provided_html": mismatch_html},
+    )
+
+    response = client.post(f"/jobs/{job_id}/candidates/run-full-evaluation", json={"candidate_url": url})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verification"]["verified"] is False
+    assert body["pricing"] is None

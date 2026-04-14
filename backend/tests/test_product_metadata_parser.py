@@ -17,6 +17,27 @@ def test_parse_product_metadata_from_fixture_html() -> None:
     assert metadata.raw_fragment is not None
 
 
+def test_parse_realistic_cardmarket_product_fixture() -> None:
+    html = (FIXTURES / "cardmarket_product_valid.html").read_text()
+    metadata = parse_product_metadata(html)
+
+    assert metadata.product_title == "Pikachu"
+    assert metadata.set_name == "Base Set"
+    assert metadata.card_number == "58/102"
+    assert metadata.variant == "Unlimited"
+    assert metadata.raw_fragment == "Pikachu | Base Set | 58/102 | Unlimited"
+
+
+def test_parse_realistic_ambiguous_product_fixture_does_not_infer_missing_fields() -> None:
+    html = (FIXTURES / "cardmarket_product_ambiguous.html").read_text()
+    metadata = parse_product_metadata(html)
+
+    assert metadata.product_title == "Pikachu"
+    assert metadata.set_name == "Base Set"
+    assert metadata.card_number is None
+    assert metadata.variant is None
+
+
 def test_missing_fields_stay_missing() -> None:
     html = (FIXTURES / "product_page_incomplete.html").read_text()
     metadata = parse_product_metadata(html)
