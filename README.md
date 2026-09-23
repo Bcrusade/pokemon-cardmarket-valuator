@@ -1,66 +1,56 @@
 # Pokemon Cardmarket Valuator
 
-Open-source web app for valuing Pokémon cards from images using verified Cardmarket product pages and deterministic pricing rules.
+Open-source MVP for valuing Pokémon cards from images using verified Cardmarket product pages and deterministic pricing.
 
-## What it does
-
-The app:
-
-1. reads card images
-2. identifies the card with AI
-3. finds candidate Cardmarket product pages
-4. verifies the correct product page
-5. applies requested filters only after verification
-6. parses real visible listings
-7. calculates price using the average of the first 5 distinct visible prices
-
-## Key Principles
-
-- Do not manually construct final Cardmarket product URLs from card data alone.
-- Do not trust a page only because the URL looks correct.
-- Do not use “from”, trend, or guide prices as final values.
-- Use AI only for identification and ambiguity handling.
-- Use deterministic code for parsing and pricing.
-
-## Pricing Methods
-
-### `verified_filtered_avg5`
-Used when the requested filters are verified and visible listings can be parsed correctly.
-
-### `nm_visible_benchmark`
-Used when exact filter verification is not demonstrable. In this case, visible Near Mint listings from the verified correct page are used as a benchmark and the limitation is explicitly reported.
-
-## Planned Stack
+## Stack
 
 - Frontend: Next.js + TypeScript
 - Backend: FastAPI + Python
-- Database: PostgreSQL
-- Browser automation: Playwright
+- Database: PostgreSQL (planned integration, MVP currently uses in-memory job store)
+- Browser automation: Playwright (module dependency included)
 
-## Repository Goals
+## API Endpoints (MVP)
 
-This is an open-source project intended for public collaboration.
+- `POST /jobs` — create a pricing job with target language and minimum condition
+- `POST /jobs/{job_id}/images` — upload one or more card images
+- `POST /jobs/{job_id}/candidates` — ingest externally discovered candidate search results
+- `POST /jobs/{job_id}/candidates/fetch-html` — fetch/store product page HTML for a known candidate URL
+- `POST /jobs/{job_id}/candidates/parse-html` — parse provided product-page HTML for known candidate URLs
+- `POST /jobs/{job_id}/candidates/parse-listings` — parse provided listing HTML for known candidate URLs
+- `POST /jobs/{job_id}/candidates/valuate` — compute deterministic valuation from stored parsed listing rows
+- `POST /jobs/{job_id}/candidates/run-full-evaluation` — run deterministic end-to-end evaluation from stored candidate HTML
+- `POST /jobs/{job_id}/analyze` — **legacy/deprecated** pre-pipeline workflow (kept for backward compatibility)
+- `GET /jobs/{job_id}` — fetch job status and stored details
+- `GET /jobs/{job_id}/results` — fetch analysis results and `cards_to_clarify`
 
-Goals:
-- transparent pricing logic
-- reproducible verification flow
-- community contribution
-- strict separation between AI-assisted identification and deterministic valuation
+### Primary workflow
 
-## Project Status
+Use candidate-driven endpoints (`/candidates/*`), especially `POST /jobs/{job_id}/candidates/run-full-evaluation`, as the main deterministic path.
 
-Early MVP specification and scaffold stage.
+## Deterministic Pricing Rules
+
+`pricing_engine` implementation:
+1. Remove flagged anomalies.
+2. Remove identical duplicate prices.
+3. Keep first 5 distinct prices.
+4. Average available selected prices.
+5. Label result as:
+   - `verified_filtered_avg5` (standard)
+   - `nm_visible_benchmark` (fallback)
+
+## Important Governance Rules
+
+- Never manually construct final Cardmarket product URLs from card data alone.
+- Never trust product pages solely because URL strings look correct.
+- Never use guide/trend/from prices as final card values.
+- Never use AI for final pricing computations.
+- Always return `cards_to_clarify` when card/page verification is uncertain.
+- Always mark fallback results explicitly as fallback.
 
 ## Local Development
 
-### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
 ### Backend
+
 ```bash
 cd backend
 python -m venv .venv
@@ -69,36 +59,40 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-## Environment Variables
+### Frontend
 
-See `.env.example`.
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-Expected variables will likely include:
+## Tests
 
-- database connection string
-- OpenAI API key
-- Playwright/browser configuration
-- app environment settings
+```bash
+cd backend
+pytest -q
+```
 
 ## Repository Structure
 
 ```text
-frontend/
 backend/
-docs/
-.github/
+  app/
+    main.py
+    schemas.py
+    store.py
+    modules/
+      anomaly_filter.py
+      candidate_search.py
+      image_identification.py
+      listing_parser.py
+      pricing_engine.py
+      product_verification.py
+  tests/
+frontend/
+  app/
 ```
-
-## Documentation
-
-- `PROJECT_SPEC.md` — functional specification
-- `AGENTS.md` — repository instructions for coding agents
-- `CONTRIBUTING.md` — contribution workflow
-- `SECURITY.md` — security reporting policy
-
-## Contributing
-
-Please read `CONTRIBUTING.md` before opening pull requests.
 
 ## License
 
