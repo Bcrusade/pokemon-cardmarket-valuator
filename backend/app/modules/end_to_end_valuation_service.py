@@ -10,6 +10,16 @@ from app.modules.valuation_service import valuate_candidate_from_rows
 from app.schemas import CandidateProduct, FullEvaluationResult, ListingRow, ListingSummary
 from app.store import InMemoryJobStore
 
+_CONDITION_RANK = {
+    "PO": 0,
+    "PL": 1,
+    "LP": 2,
+    "GD": 3,
+    "EX": 4,
+    "NM": 5,
+    "M": 6,
+}
+
 
 def _get_candidate_for_url(store: InMemoryJobStore, job_id: UUID, candidate_url: str) -> CandidateProduct | None:
     job = store.get_job(job_id)
@@ -17,6 +27,38 @@ def _get_candidate_for_url(store: InMemoryJobStore, job_id: UUID, candidate_url:
         if item.get("candidate_url") == candidate_url:
             return CandidateProduct(**item)
     return None
+
+
+def _condition_satisfies_minimum(row_condition: str | None, minimum_condition: str) -> bool:
+    if row_condition is None:
+        return False
+    row_rank = _CONDITION_RANK.get(row_condition.strip().upper())
+    minimum_rank = _CONDITION_RANK.get(minimum_condition.strip().upper())
+    if row_rank is None or minimum_rank is None:
+        return False
+    return row_rank >= minimum_rank
+
+
+def evaluate_verified_filtered_demonstrable(
+    rows: list[ListingRow],
+    *,
+    target_language: str,
+    minimum_condition: str,
+) -> bool:
+    valid_rows = [
+        row
+        for row in rows
+        if row.price is not None and not row.flagged_anomaly and not row.flags
+    ]
+    if not valid_rows:
+        return False
+
+    for row in valid_rows:
+        if row.language is None or row.language.strip().lower() != target_language.strip().lower():
+            return False
+        if not _condition_satisfies_minimum(row.condition, minimum_condition):
+            return False
+    return True
 
 
 def run_full_evaluation(
@@ -50,6 +92,7 @@ def run_full_evaluation(
             verification=verification,
             parsed_metadata=metadata,
             listing_summary=ListingSummary(total_rows=0, anomaly_rows=0, priced_rows=0),
+            verified_filtered_demonstrable=False,
             pricing=None,
             method_used="verification_failed",
             notes=["Stopped before pricing because verification failed."],
@@ -73,7 +116,13 @@ def run_full_evaluation(
     if priced_rows == 0:
         raise ValueError("No usable non-anomalous listing rows available for pricing.")
 
-    demonstrable = store.get_verified_filtered_context(job_id, candidate_url)
+    demonstrable = evaluate_verified_filtered_demonstrable(
+        rows,
+        target_language=job.target_language,
+        minimum_condition=job.minimum_condition,
+    )
+    store.save_verified_filtered_context(job_id, candidate_url, demonstrable)
+
     valuation = valuate_candidate_from_rows(
         candidate_url=candidate_url,
         rows=rows,
@@ -85,6 +134,7 @@ def run_full_evaluation(
         verification=verification,
         parsed_metadata=metadata,
         listing_summary=ListingSummary(total_rows=len(rows), anomaly_rows=anomaly_rows, priced_rows=priced_rows),
+        verified_filtered_demonstrable=demonstrable,
         pricing=valuation,
         method_used=valuation.pricing_method,
         notes=["Full deterministic pipeline executed from stored candidate context."],

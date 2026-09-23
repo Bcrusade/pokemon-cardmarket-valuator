@@ -181,6 +181,7 @@ class FullEvaluationResult(BaseModel):
     verification: VerificationResult
     parsed_metadata: ProductPageMetadata
     listing_summary: ListingSummary
+    verified_filtered_demonstrable: bool = False
     pricing: ValuationResult | None = None
     method_used: str
     notes: list[str] = Field(default_factory=list)

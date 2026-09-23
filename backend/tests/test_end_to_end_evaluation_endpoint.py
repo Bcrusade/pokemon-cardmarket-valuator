@@ -55,7 +55,6 @@ def test_full_pipeline_success() -> None:
         title="Pikachu - Base Set 58/102 Unlimited",
     )
     _save_identified(job_id, url)
-    store.save_verified_filtered_context(UUID(job_id), url, True)
 
     full_html = (
         "<html><h1>Pikachu</h1><div data-set-name=\"Base Set\"></div><span>58/102</span><span>Unlimited</span>"
@@ -75,6 +74,8 @@ def test_full_pipeline_success() -> None:
     body = response.json()
     assert body["verification"]["verified"] is True
     assert body["pricing"]["average_price"] == 3.0
+    assert body["verified_filtered_demonstrable"] is False
+    assert store.get_verified_filtered_context(UUID(job_id), url) is False
 
 
 def test_verification_failure_stops_pricing() -> None:
@@ -231,7 +232,6 @@ def test_realistic_fixtures_produce_verified_pricing_result() -> None:
         title="Pikachu - Base Set 58/102 Unlimited",
     )
     _save_identified(job_id, url)
-    store.save_verified_filtered_context(UUID(job_id), url, True)
 
     product_html = (FIXTURES / "cardmarket_product_valid.html").read_text()
     listing_html = (FIXTURES / "cardmarket_listings_valid.html").read_text()
@@ -245,7 +245,9 @@ def test_realistic_fixtures_produce_verified_pricing_result() -> None:
     body = response.json()
     assert body["verification"]["verified"] is True
     assert body["pricing"]["average_price"] == 4.75
-    assert body["pricing"]["pricing_method"] == "verified_filtered_avg5"
+    assert body["pricing"]["pricing_method"] == "nm_visible_benchmark"
+    assert body["verified_filtered_demonstrable"] is False
+    assert store.get_verified_filtered_context(UUID(job_id), url) is False
 
 
 def test_realistic_mismatch_fixture_fails_verification_cleanly() -> None:
@@ -268,3 +270,63 @@ def test_realistic_mismatch_fixture_fails_verification_cleanly() -> None:
     body = response.json()
     assert body["verification"]["verified"] is False
     assert body["pricing"] is None
+    assert body["verified_filtered_demonstrable"] is False
+
+
+def test_verified_filtered_demonstrable_true_when_all_valid_rows_match_filters() -> None:
+    client = TestClient(app)
+    job_id, url = _create_job_with_candidate(
+        client,
+        set_name="Base Set",
+        card_number="58/102",
+        title="Pikachu - Base Set 58/102 Unlimited",
+    )
+    _save_identified(job_id, url)
+    html = (
+        "<html><h1>Pikachu</h1><div data-set-name=\"Base Set\"></div><span>58/102</span><span>Unlimited</span>"
+        "<table>"
+        "<tr class=\"listing-row\"><td data-price=\"4.00\" data-condition=\"NM\" data-language=\"English\"></td></tr>"
+        "<tr class=\"listing-row\"><td data-price=\"5.00\" data-condition=\"NM\" data-language=\"English\"></td></tr>"
+        "<tr class=\"listing-row\"><td data-price=\"99999\" data-condition=\"PL\" data-language=\"German\" data-flags=\"non-comparable\"></td></tr>"
+        "</table></html>"
+    )
+    client.post(
+        f"/jobs/{job_id}/candidates/fetch-html",
+        json={"candidate_url": url, "retrieval_mode": "provided", "provided_html": html},
+    )
+
+    response = client.post(f"/jobs/{job_id}/candidates/run-full-evaluation", json={"candidate_url": url})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verified_filtered_demonstrable"] is True
+    assert body["pricing"]["pricing_method"] == "verified_filtered_avg5"
+    assert store.get_verified_filtered_context(UUID(job_id), url) is True
+
+
+def test_verified_filtered_demonstrable_false_when_valid_rows_do_not_match_filters() -> None:
+    client = TestClient(app)
+    job_id, url = _create_job_with_candidate(
+        client,
+        set_name="Base Set",
+        card_number="58/102",
+        title="Pikachu - Base Set 58/102 Unlimited",
+    )
+    _save_identified(job_id, url)
+    html = (
+        "<html><h1>Pikachu</h1><div data-set-name=\"Base Set\"></div><span>58/102</span><span>Unlimited</span>"
+        "<table>"
+        "<tr class=\"listing-row\"><td data-price=\"4.00\" data-condition=\"NM\" data-language=\"English\"></td></tr>"
+        "<tr class=\"listing-row\"><td data-price=\"5.00\" data-condition=\"EX\" data-language=\"German\"></td></tr>"
+        "</table></html>"
+    )
+    client.post(
+        f"/jobs/{job_id}/candidates/fetch-html",
+        json={"candidate_url": url, "retrieval_mode": "provided", "provided_html": html},
+    )
+
+    response = client.post(f"/jobs/{job_id}/candidates/run-full-evaluation", json={"candidate_url": url})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verified_filtered_demonstrable"] is False
+    assert body["pricing"]["pricing_method"] == "nm_visible_benchmark"
+    assert store.get_verified_filtered_context(UUID(job_id), url) is False
